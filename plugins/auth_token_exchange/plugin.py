@@ -21,6 +21,9 @@ from mcpgateway.plugins.framework import (
 from mcpgateway.plugins.framework.models import PluginViolation
 from plugins.auth_token_exchange.oauth_lib import OAuthClientConfig, OAuthClient
 
+import logging
+
+logger = logging.getLogger(__name__)
 
 def _load_oauth_config() -> Dict[str, str]:
     token_endpoint = os.getenv("OAUTH_TOKEN_ENDPOINT")
@@ -71,7 +74,7 @@ class TokenExchange(Plugin):
         Returns:
             The result of the plugin's analysis, including whether the tool can proceed.
         """
-        
+
         incoming_token = context.state["tc_token"][-1] if context.state["tc_token"] else None
         if incoming_token is None:
             return ToolPreInvokeResult(
@@ -82,12 +85,15 @@ class TokenExchange(Plugin):
                     code="NOT FOUND"
                 ),
             ) 
+    
+        logger.info("Incoming Token: %s", incoming_token)
         exchanged_token = self.oauth_client.token_exchange(
             subject_token=incoming_token,
             new_scopes=self.cfg["scopes"].split(" ")
         )
 
         exchanged_access_token = exchanged_token.get("access_token")
+        logger.info("Exchanged Token: %s", exchanged_access_token)
 
         if exchanged_access_token is not None:
             context.state["tc_token"].append(exchanged_access_token)
