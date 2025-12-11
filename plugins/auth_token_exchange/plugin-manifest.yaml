@@ -1,0 +1,13 @@
+description: "Plugin to exchange token"
+author: "Abhishek Singh"
+version: "0.1.0"
+available_hooks:
+  - "tool_pre_hook"
+tags: 
+  - "security"
+  - "oauth"
+  - "token-exchange"
+plugin_type: "native"                    # native | external
+language: "python"                       # python | typescript | go | rust | java
+performance_tier: "high" 
+default_configs:
