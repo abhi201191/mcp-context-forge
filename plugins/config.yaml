@@ -15,6 +15,17 @@ plugin_settings:
   plugin_health_check_interval: 120
 
 plugins:
+  - name: "TokenExchange"
+    kind: "plugins.auth_token_exchange.auth_token_exchange.TokenExchange"
+    description: "Plugin to exchange token"
+    version: "0.1.0"
+    author: "Abhishek Singh"
+    hooks: ["tool_pre_invoke"]
+    tags: ["security", "oauth", "token-exchange"] 
+    mode: "enforce"  # enforce | permissive | disabled
+    priority: 150
+    conditions: []
+    config: {}
   # Argument Normalizer - stabilize inputs before anything else
   - name: "ArgumentNormalizer"
     kind: "plugins.argument_normalizer.argument_normalizer.ArgumentNormalizerPlugin"
