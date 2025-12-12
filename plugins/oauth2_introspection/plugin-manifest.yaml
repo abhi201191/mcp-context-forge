@@ -1,0 +1,17 @@
+name: oauth2_introspection
+version: 1.0.1
+description: OAuth2/OIDC token introspection authentication for MCP Gateway via HTTP auth hooks
+author: Akshar Kaul
+kind: plugins.oauth2_introspection.oauth2_introspection.py
+class: OAuth2IntrospectionPlugin
+hooks:
+  - http_auth_resolve_user
+default_config:
+  introspection_url: "****"
+  client_id: "****"
+  client_secret: "****"
+  auth_method: "basic"
+  audience: "****"
+  required_scopes: []
+  request_timeout_seconds: 30
+  expose_raw_token_in_context: false
