@@ -21,11 +21,30 @@ plugins:
     version: "0.1.0"
     author: "Abhishek Singh"
     hooks: ["tool_pre_invoke"]
-    tags: ["security", "oauth", "token-exchange"] 
+    tags: ["security", "oauth", "token-exchange"]
     mode: "enforce"  # enforce | permissive | disabled
     priority: 150
     conditions: []
     config: {}
+  - name: "oauth2_introspection"
+    kind: "plugins.oauth2_introspection.oauth2_introspection.OAuth2IntrospectionPlugin"
+    description: "Plugin to validate incoming tokens via OAuth2 introspection endpoint"
+    version: "1.0.0"
+    author: "Akshar Kaul"
+    hooks: [ "http_auth_resolve_user" ]
+    tags: [ "security", "oauth2"]
+    mode: "enforce"
+    priority: 10
+    conditions: [ ]
+    config:
+      introspection_url: "****"
+      client_id: "****"
+      client_secret: "****"
+      auth_method: "basic"
+      audience: null
+      required_scopes: []
+      request_timeout_seconds: 30
+      expose_raw_token_in_context: true
   # Argument Normalizer - stabilize inputs before anything else
   - name: "ArgumentNormalizer"
     kind: "plugins.argument_normalizer.argument_normalizer.ArgumentNormalizerPlugin"
