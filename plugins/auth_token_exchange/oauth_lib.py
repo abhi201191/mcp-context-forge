@@ -1,7 +1,11 @@
+# type: ignore
+
 from typing import Optional
-import requests
-from authlib.jose import JsonWebKey, JsonWebToken
+
 from authlib.integrations.requests_client import OAuth2Session
+from authlib.jose import JsonWebKey, JsonWebToken
+import requests
+
 
 class OAuthClientConfig:
     def __init__(
@@ -42,7 +46,7 @@ class OAuthClient:
 
         if not self.config.redirect_uri:
             raise ValueError("redirect_uri is required")
-        
+
         default_scopes = self.config.default_scopes or ""
         scopes = scopes or default_scopes.split(" ")
 
@@ -55,7 +59,6 @@ class OAuthClient:
         self.state = state
         return uri
 
-
     def exchange_code_for_token(self, code: str):
         if not self.config.token_endpoint:
             raise ValueError("token_endpoint is required")
@@ -67,7 +70,6 @@ class OAuthClient:
             auth=(self.config.client_id, self.config.client_secret),
         )
 
-
     def validate_jwt(self, token: str):
         if not self.config.jwks_uri:
             raise ValueError("jwks_uri is required")
@@ -77,11 +79,9 @@ class OAuthClient:
         claims = jwt.decode(token, jwk_set)
         claims.validate()
         return claims
-    
 
     def extract_claims(self, token: str):
         return self.validate_jwt(token)
-    
 
     def refresh_token(self, refresh_token: str, scopes: Optional[list[str]] = None):
         scope_str = " ".join(scopes) if scopes else None
@@ -91,7 +91,6 @@ class OAuthClient:
             refresh_token=refresh_token,
             scope=scope_str,
         )
-    
 
     def token_exchange(self, subject_token: str, new_scopes: Optional[list[str]] = None):
         if not self.config.token_endpoint:
@@ -100,12 +99,12 @@ class OAuthClient:
             raise ValueError("client_id is required")
         if not self.config.client_secret:
             raise ValueError("client_secret is required")
-        data={
-                "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
-                "requested_token_type": "urn:ietf:params:oauth:token-type:access_token",
-                "subject_token": subject_token,
-                "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
-            }
+        data = {
+            "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+            "requested_token_type": "urn:ietf:params:oauth:token-type:access_token",
+            "subject_token": subject_token,
+            "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
+        }
         if new_scopes:
             data["scope"] = " ".join(new_scopes)
 
@@ -114,7 +113,6 @@ class OAuthClient:
             data=data,
             auth=(self.config.client_id, self.config.client_secret),
         ).json()
-    
 
     def validate_id_token(self, id_token: str):
         return self.validate_jwt(id_token)

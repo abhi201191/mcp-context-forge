@@ -27,7 +27,11 @@ from mcpgateway.plugins.framework import (
     PluginViolation,
     PluginViolationError,
 )
-from mcpgateway.plugins.framework.hooks.http import HttpAuthResolveUserResult
+from mcpgateway.plugins.framework.hooks.http import (
+    HttpAuthResolveUserResult,
+    HttpPreRequestPayload,
+    HttpPreRequestResult,
+)
 from mcpgateway.plugins.framework.models import PluginResult
 
 logger = logging.getLogger(__name__)
@@ -114,6 +118,138 @@ class OAuth2IntrospectionPlugin(Plugin):
             return None
         except Exception:
             return None
+
+    async def http_pre_request(self, payload: HttpPreRequestPayload, context: PluginContext) -> HttpPreRequestResult:
+        """Perform OAuth2 introspection during HTTP_PRE_REQUEST.
+
+        Logic mirrors `http_auth_resolve_user`, but extracts the token from
+        the Authorization header instead of FastAPI credentials.
+        """
+        # Extract Bearer token from headers
+        headers = payload.headers.root if payload.headers is not None else {}
+        auth_header = None
+        # Normalize header lookup
+        for key in ["tc_token"]:
+            if key in headers:
+                auth_header = headers[key]
+                logger.info(f"[OAuth2Introspection] (PRE_REQUEST) Found Bearer token in header '{key}':'{auth_header}")
+                break
+        if not auth_header:
+            for key in ["authorization", "Authorization"]:
+                if key in headers:
+                    auth_header = headers[key]
+                    logger.info(f"[OAuth2Introspection] (PRE_REQUEST) Found Bearer token in header '{key}':'{auth_header}")
+                    break
+
+        token: Optional[str] = None
+        if isinstance(auth_header, str) and auth_header.lower().startswith("bearer "):
+            token = auth_header[7:].strip()
+
+        if not token:
+            logger.info("[OAuth2Introspection] No Bearer token in headers, continuing to standard auth")
+            return PluginResult(continue_processing=True, metadata={"custom_auth": "not_applicable"})
+
+        # If the token is a valid JWT and issuer is our gateway, fall back (do not introspect)
+        issuer = self._get_jwt_issuer(token)
+        if issuer == "mcpgateway":
+            logger.info("[OAuth2Introspection] Skipping introspection for JWT issued by gateway.")
+            return PluginResult(continue_processing=True, metadata={"custom_auth": "not_applicable"})
+
+        # Call IDP introspection API
+        logger.info("[OAuth2Introspection] (PRE_REQUEST) Introspecting token with IDP.")
+        introspection: dict[str, Any]
+        try:
+            data: dict[str, str] = {"token": token}
+            post_headers: dict[str, str] = {}
+            auth: aiohttp.BasicAuth | None = None
+            if self._cfg.auth_method == "basic":
+                auth = aiohttp.BasicAuth(self._cfg.client_id, self._cfg.client_secret)
+            else:
+                data["client_id"] = self._cfg.client_id
+                data["client_secret"] = self._cfg.client_secret
+
+            timeout = aiohttp.ClientTimeout(total=self._cfg.request_timeout_seconds)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(self._cfg.introspection_url, data=data, headers=post_headers, auth=auth) as resp:
+                    resp.raise_for_status()
+                    introspection = await resp.json()
+        except Exception as e:
+            logger.error("[OAuth2Introspection] (PRE_REQUEST) Introspection call failed: %s", e)
+            raise PluginViolationError(
+                message="Token introspection failed.",
+                violation=PluginViolation(
+                    reason="Token introspection failed.",
+                    description=f"Token introspection failed: {e}",
+                    code="AUTH_ERROR",
+                ),
+            )
+        logger.info("[OAuth2Introspection] (PRE_REQUEST) Introspection with IDP successful.")
+
+        # Validate that the token is active
+        if not introspection.get("active"):
+            raise PluginViolationError(
+                message="Inactive or invalid token",
+                violation=PluginViolation(
+                    reason="Inactive or invalid token",
+                    description="The provided access token is inactive or invalid per introspection.",
+                    code="INACTIVE_TOKEN",
+                ),
+            )
+
+        # Validate the audience claim
+        if self._cfg.audience:
+            aud = introspection.get("aud") or introspection.get("client_id")
+            if isinstance(aud, list):
+                valid_audience = self._cfg.audience in aud
+            else:
+                valid_audience = aud == self._cfg.audience
+            if not valid_audience:
+                raise PluginViolationError(
+                    message="Inactive or invalid token",
+                    violation=PluginViolation(
+                        reason="Audience mismatch",
+                        description="Token audience does not match required audience.",
+                        code="INVALID_AUDIENCE",
+                    ),
+                )
+
+        # Validate the scopes
+        valid_scopes = True
+        missing_scopes: list[str] = []
+        if self._cfg.required_scopes:
+            token_scopes = introspection.get("scope") or introspection.get("scopes")
+            if isinstance(token_scopes, str):
+                token_scopes = token_scopes.split()
+            token_scopes_set = set(token_scopes or [])
+            required_set = set(self._cfg.required_scopes)
+            missing_scopes = sorted(list(required_set - token_scopes_set))
+            valid_scopes = len(missing_scopes) == 0
+        if not valid_scopes:
+            missing_scopes_str = ", ".join(missing_scopes)
+            raise PluginViolationError(
+                message="Required scopes not present",
+                violation=PluginViolation(
+                    reason="Missing required scopes",
+                    description=f"The token is missing required scopes: {missing_scopes_str}",
+                    code="MISSING_REQUIRED_SCOPES",
+                ),
+            )
+
+        # Store token and introspection in plugin context.state for downstream usage
+        token_entry = {
+            "token": token if self._cfg.expose_raw_token_in_context else "***redacted***",
+            "introspection": introspection,
+        }
+        existing = context.global_context.state.get("tc_token", [])
+        if isinstance(existing, list):
+            logger.info("[OAuth2Introspection] (PRE_REQUEST) Storing token in global context state.")
+            existing.append(token_entry)
+        else:
+            logger.info("[OAuth2Introspection] (PRE_REQUEST) Storing token in global context state.")
+            context.global_context.state["tc_token"] = [token_entry]
+
+        # Nothing to modify in headers; simply continue
+        return PluginResult(continue_processing=True, metadata={"auth_method": "oauth2"})
 
     async def http_auth_resolve_user(self, payload: HttpAuthResolveUserPayload, context: PluginContext) -> HttpAuthResolveUserResult:
         # Extract token from credentials or headers
